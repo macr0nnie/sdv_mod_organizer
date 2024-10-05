@@ -1,0 +1,221 @@
+import os
+import shutil
+import json
+from typing import Dict, List
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog
+
+# Define default categories for mod organization
+DEFAULT_CATEGORIES: Dict[str, List[str]] = {
+    "Clothing/Fashion Sense": ["[CP] ", "Fashion", "Clothing", "Outfit"],
+    "QualityOfLife": ["UI", "Interface", "QoL", "Quality of Life", "Automation"],
+    "Expansions/NPC": ["Expanded", "NPC", "Character", "Dialogue", "Quest"],
+    "Buildings": ["Building", "Farm", "Structure"],
+    "Recolors": ["Recolor", "Retexture", "Seasonal"],
+    "Other": []
+}
+
+CONFIG_FILE = "mod_organizer_config.json"
+
+def load_config() -> Dict:
+    """Load configuration from file or return default if file doesn't exist."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            for category in DEFAULT_CATEGORIES:
+                if category not in config["categories"]:
+                    config["categories"][category] = DEFAULT_CATEGORIES[category]
+            return config
+    return {"mods_folder": "", "categories": DEFAULT_CATEGORIES}
+
+def save_config(config: Dict) -> None:
+    """Save configuration to file."""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=4)
+
+def get_mod_type(mod_path: str, categories: Dict[str, List[str]]) -> str:
+    """Determine the type of mod based on its name and contents."""
+    mod_name = os.path.basename(mod_path)
+    
+    for category, keywords in categories.items():
+        if any(keyword.lower() in mod_name.lower() for keyword in keywords):
+            return category
+        
+        manifest_path = os.path.join(mod_path, "manifest.json")
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, 'r', encoding='utf-8') as f:
+                    manifest_content = f.read().lower()
+                    if any(keyword.lower() in manifest_content for keyword in keywords):
+                        return category
+            except Exception:
+                pass
+    
+    return "Other"
+
+def organize_mods(mods_folder: str, categories: Dict[str, List[str]]) -> None:
+    """Organize mods into categories within the mods folder."""
+    for mod in os.listdir(mods_folder):
+        mod_path = os.path.join(mods_folder, mod)
+        if os.path.isdir(mod_path):
+            mod_type = get_mod_type(mod_path, categories)
+            category_folder = os.path.join(mods_folder, mod_type)
+            
+            os.makedirs(category_folder, exist_ok=True)
+            
+            destination = os.path.join(category_folder, mod)
+            if mod_path != destination:
+                shutil.move(mod_path, destination)
+                print(f"Moved {mod} to {mod_type}")
+
+def unorganize_mods(mods_folder: str) -> None:
+    """Move all mods from category subfolders back to the main mods folder."""
+    for category_folder in os.listdir(mods_folder):
+        category_path = os.path.join(mods_folder, category_folder)
+        if os.path.isdir(category_path):
+            for mod in os.listdir(category_path):
+                mod_path = os.path.join(category_path, mod)
+                if os.path.isdir(mod_path):
+                    destination = os.path.join(mods_folder, mod)
+                    if mod_path != destination:
+                        shutil.move(mod_path, destination)
+                        print(f"Moved {mod} back to main folder")
+    
+    # Remove empty category folders
+    for category_folder in os.listdir(mods_folder):
+        category_path = os.path.join(mods_folder, category_folder)
+        if os.path.isdir(category_path) and not os.listdir(category_path):
+            os.rmdir(category_path)
+            print(f"Removed empty category folder: {category_folder}")
+
+class StardewThemeButton(tk.Button):
+    def __init__(self, master, **kw):
+        tk.Button.__init__(self, master=master, **kw)
+        self.config(
+            background="#4a6cd4",
+            foreground="white",
+            font=("Courier New", 12),
+            borderwidth=0,
+            padx=10,
+            pady=5,
+            activebackground="#3a5cb4",
+            activeforeground="white"
+        )
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+
+    def on_enter(self, e):
+        self['background'] = "#3a5cb4"
+
+    def on_leave(self, e):
+        self['background'] = "#4a6cd4"
+
+class ModOrganizerGUI:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Stardew Valley Mod Organizer")
+        self.master.geometry("600x400")
+        self.master.configure(bg="#e8d5a9")  # Light wheat color
+
+        self.config = load_config()
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Title Label
+        tk.Label(self.master, text="Stardew Valley Mod Organizer", font=("Courier New", 20), bg="#e8d5a9", fg="#4a6cd4").pack(pady=10)
+
+        tk.Label(self.master, text="Select your Stardew Valley Mods folder:", font=("Courier New", 12), bg="#e8d5a9", fg="#4a6cd4").pack(pady=5)
+
+        self.folder_path = tk.StringVar(value=self.config["mods_folder"])
+        tk.Entry(self.master, textvariable=self.folder_path, width=50, font=("Courier New", 10)).pack(pady=5)
+
+        StardewThemeButton(self.master, text="Browse", command=self.browse_folder).pack(pady=5)
+        StardewThemeButton(self.master, text="Edit Categories", command=self.edit_categories).pack(pady=5)
+        StardewThemeButton(self.master, text="Organize Mods", command=self.start_organization).pack(pady=5)
+        StardewThemeButton(self.master, text="Unorganize Mods", command=self.start_unorganization).pack(pady=5)
+
+    def browse_folder(self):
+        folder_selected = filedialog.askdirectory()
+        if folder_selected:
+            self.folder_path.set(folder_selected)
+            self.config["mods_folder"] = folder_selected
+            save_config(self.config)
+
+    def edit_categories(self):
+        CategoryEditorWindow(self.master, self.config["categories"])
+
+    def start_organization(self):
+        mods_folder = self.folder_path.get()
+        if not mods_folder:
+            messagebox.showerror("Error", "Please select a folder")
+            return
+        
+        try:
+            organize_mods(mods_folder, self.config["categories"])
+            messagebox.showinfo("Success", "Mods organized successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def start_unorganization(self):
+        mods_folder = self.folder_path.get()
+        if not mods_folder:
+            messagebox.showerror("Error", "Please select a folder")
+            return
+        
+        try:
+            unorganize_mods(mods_folder)
+            messagebox.showinfo("Success", "Mods unorganized successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+class CategoryEditorWindow(tk.Toplevel):
+    def __init__(self, parent, categories):
+        super().__init__(parent)
+        self.title("Edit Categories")
+        self.geometry("500x400")
+        self.configure(bg="#e8d5a9")
+        
+        self.categories = categories
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        tk.Label(self, text="Edit Categories", font=("Courier New", 16), bg="#e8d5a9", fg="#4a6cd4").pack(pady=10)
+
+        self.listbox = tk.Listbox(self, width=50, font=("Courier New", 10))
+        self.listbox.pack(pady=10)
+
+        self.update_listbox()
+
+        StardewThemeButton(self, text="Edit Category", command=self.edit_category).pack(pady=10)
+
+    def update_listbox(self):
+        self.listbox.delete(0, tk.END)
+        for category, keywords in self.categories.items():
+            self.listbox.insert(tk.END, f"{category}: {', '.join(keywords)}")
+
+    def edit_category(self):
+        selection = self.listbox.curselection()
+        if selection:
+            category = list(self.categories.keys())[selection[0]]
+            keywords = simpledialog.askstring("Edit Category",
+                                              f"Enter keywords for {category} (comma-separated):",
+                                              initialvalue=','.join(self.categories[category]))
+            if keywords is not None:
+                self.categories[category] = [k.strip() for k in keywords.split(',') if k.strip()]
+                self.update_listbox()
+                self.save_categories()
+
+    def save_categories(self):
+        config = load_config()
+        config["categories"] = self.categories
+        save_config(config)
+
+def main():
+    root = tk.Tk()
+    ModOrganizerGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
